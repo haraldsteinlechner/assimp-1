@@ -50,6 +50,8 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "../include/assimp/ai_assert.h"
 #include <boost/format.hpp>
 
+#include <sstream> 
+
 namespace Assimp
 {
 
