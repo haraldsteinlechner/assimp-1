@@ -48,6 +48,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <vector>
 
 #include "bk3dBase.h"
+#include "bk3dEx.h"
 
 //struct aiMesh;
 //struct aiNode;

@@ -60,16 +60,16 @@ using namespace Assimp;
 using namespace std;
 
 static const aiImporterDesc desc = {
-	"BlitzBasic 3D Importer",
+	"BK3D Importer",
 	"",
 	"",
-	"http://www.blitzbasic.com/",
+	"",
 	aiImporterFlags_SupportBinaryFlavour,
 	0,
 	0,
 	0,
 	0,
-	"b3d"
+	"bk3d"
 };
 
 // (fixme, Aramis) quick workaround to get rid of all those signed to unsigned warnings
@@ -91,7 +91,11 @@ Bk3dImporter::~Bk3dImporter()
 // ------------------------------------------------------------------------------------------------
 bool Bk3dImporter::CanRead(const std::string& pFile, IOSystem* /*pIOHandler*/, bool /*checkSig*/) const{
 
-	throw "not implemented";
+	if (pFile.find("bk3d.gz") != std::string::npos) 
+	{
+		return bk3d::tryLoad(pFile.c_str());
+	}
+	return false;
 }
 
 // ------------------------------------------------------------------------------------------------
@@ -107,13 +111,66 @@ extern "C"{ void _stdcall AllocConsole(); }
 // ------------------------------------------------------------------------------------------------
 void Bk3dImporter::InternReadFile(const std::string& pFile, aiScene* pScene, IOSystem* pIOHandler){
 	auto fileHeader = bk3d::load(pFile.c_str());
+	auto meshes = new vector<aiMesh*>();
+	auto nodes = new vector<aiNode*>();
+	auto rootNode = new aiNode();
+	for (int i = 0; i < fileHeader->pMeshes->n; i++)
+	{
+		auto mesh = fileHeader->pMeshes->p[i];
+		auto newMesh = new aiMesh;
+		newMesh->mName = mesh->name;
+		bk3d::Attribute* positions = mesh->pAttributes->p[0];
+		auto sizeBytes = mesh->pSlots->p[positions->slot]->vtxBufferSizeBytes;
+		newMesh->mVertices = (aiVector3D*) positions->pAttributeBufferData;
+		switch (positions->formatGL)
+		{
+		case GL_FLOAT:
+			newMesh->mNumVertices = sizeBytes / (sizeof(float) * positions->numComp);
+			break;
+		default: throw "oida";
+		}
+		//if (mesh->pAttributes->n > 1)
+		for (int i = 0; i < mesh->pTransforms->n; i++)
+		{
+			auto transform = mesh->pTransforms->p[i].p;
+			if (transform->nodeType == NODE_TRANSFORM || transform->nodeType == NODE_TRANSFORMSIMPLE)
+			{
+				auto matrix = transform->asTransfSimple()->pMatrixAbs;
+				auto aiMatrix = aiMatrix4x4(
+					matrix->m[0], matrix->m[1], matrix->m[2], matrix->m[3],
+					matrix->m[4], matrix->m[5], matrix->m[6], matrix->m[7],
+					matrix->m[8], matrix->m[9], matrix->m[10], matrix->m[11],
+					matrix->m[12], matrix->m[13], matrix->m[14], matrix->m[15]);
 
-}
+				auto node = new aiNode();
+				node->mNumMeshes = 1;
+				node->mTransformation = aiMatrix;
+				node->mNumChildren = 0;
+				node->mParent = rootNode;
+				node->mMeshes = new unsigned int[1] {  (unsigned int)meshes->size() };
+				nodes->push_back(node);
+			}
+			else throw "dont understand bones";
+			//if (auto v = dynamic_cast<bk3d::TransformSimple*>(transform.p)) {
+			//}
+		}
+		meshes->push_back(newMesh);
+	}
+	pScene->mMeshes = meshes->data();
+	pScene->mNumMeshes = meshes->size();
 
-aiMesh* Bk3dImporter::ReadMesh(bk3d::Mesh *mesh){
-	auto newMesh = new aiMesh;
-	newMesh->mName = mesh->name;
-	throw "uadsf";
+	rootNode->mChildren = nodes->data();
+	rootNode->mNumChildren = nodes->size();
+
+	pScene->mRootNode = rootNode;
+	pScene->mNumMaterials = 0;
+	pScene->mNumAnimations = 0;
+	pScene->mNumCameras = 0;
+	pScene->mNumLights = 0;
+	pScene->mNumTextures = 0;
+
+	std::cout << pScene << endl;
+	std::cout << pScene->mRootNode << endl;
 }
 
 

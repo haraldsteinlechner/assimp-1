@@ -710,6 +710,53 @@ INLINE void FileHeader::restorePointerOffsets(void* pBufferArea)
     pRelocationTable->pRelocationOffsets = (RelocationTable::Offsets*)((size_t)pRelocationTable->pRelocationOffsets - (size_t)this);
     pRelocationTable = (RelocationTable*)((size_t)pRelocationTable - (size_t)this);
 }
+
+static bool tryLoad(const char * fname)
+{
+	GFILE fd = NULL;
+	if (!fname)
+		return NULL;
+	fd = GOPEN(fname, "rb");
+	if (!fd)
+	{
+		EPRINTF((TEXT("Error : couldn't load ") FSTR TEXT("\n"), fname));
+		return false;
+	}
+	unsigned LONG realsize = 0;
+#ifdef NOGZLIB
+	fseek(fd, 0, SEEK_END);
+	realsize = ftell(fd);
+	fseek(fd, 0, SEEK_SET);
+#else
+	FILE *file = fopen(fname, "rb");
+	// http://www.onicos.com/staff/iz/formats/gzip.html header must have 0x1f 0x8b
+	unsigned short header;
+	fread(&header, 2, 1, file);
+	fseek(file, 0, SEEK_END);
+	realsize = ftell(file);
+	if (header == 0x8b1f) // fetch the real size at the end
+	{
+		fseek(file, realsize - 4, SEEK_SET);
+		fread(&realsize, 4, 1, file);
+	}
+	fclose(file);
+#endif
+	// load the Node, first
+	int n = 0;
+	unsigned int offs = sizeof(Node);
+	char * memory = (char*) malloc(offs);
+	n = GREAD(fd, memory, offs);
+	auto interpreted = (FileHeader *) memory;
+	if (((FileHeader *) memory)->version != RAWMESHVERSION)
+	{
+		PRINTF((TEXT("Error>> Wrong version in Mesh description\n")));
+		PRINTF((TEXT("needed %x and got %x\n"), RAWMESHVERSION, ((FileHeader *) memory)->version));
+		free(memory);
+		return false;
+	}
+	GCLOSE(fd);
+	return true;
+}
 //--------------------------------
 // 
 /// LOAD function
