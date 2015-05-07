@@ -143,7 +143,7 @@ struct aiFace
 	//! Default destructor. Delete the index array
 	~aiFace()
 	{
-		delete [] mIndices;
+		//delete [] mIndices;
 	}
 
 	//! Copy constructor. Copy the index array
@@ -664,7 +664,7 @@ struct aiMesh
 			delete [] mAnimMeshes;
 		}
 
-		delete [] mFaces;
+		//delete [] mFaces;
 	}
 
 	//! Check whether the mesh contains positions. Provided no special

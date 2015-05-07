@@ -272,6 +272,15 @@ SET( MD2_SRCS
 	MD2Loader.h
 	MD2NormalTable.h
 )
+SOURCE_GROUP( BK3D FILES {${BK3D_SRCS}})
+
+SET( BK3D_SRCS
+	Bk3dImporter.cpp
+	Bk3dImporter.h
+    bk3dBase.h
+    bk3dDefs.h
+    bk3dEx.h
+)
 SOURCE_GROUP( MD2 FILES ${MD2_SRCS})
 
 SET( MD3_SRCS
@@ -694,6 +703,7 @@ SET( assimp_src
 	${DXF_SRCS}
 	${CSM_SRCS}
 	${HMP_SRCS}
+    ${BK3D_SRCS}
 	${Irr_SRCS}
 	${LWO_SRCS}
 	${LWS_SRCS}

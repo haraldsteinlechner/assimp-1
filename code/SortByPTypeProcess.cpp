@@ -330,7 +330,7 @@ void SortByPTypeProcess::Execute( aiScene* pScene)
 					in.mIndices[q] = outIdx++;
 				}
 
-				in.mIndices = NULL;
+				// in.mIndices = NULL;
 				++outFaces;
 			}
 			ai_assert(outFaces == out->mFaces + out->mNumFaces);

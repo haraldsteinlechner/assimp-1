@@ -54,7 +54,8 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "../include/assimp/anim.h"
 #include "../include/assimp/scene.h"
 #include "../include/assimp/DefaultLogger.hpp"
-
+#include <iostream>
+#include "MakeVerboseFormat.h"
 
 using namespace Assimp;
 using namespace std;
@@ -69,7 +70,7 @@ static const aiImporterDesc desc = {
 	0,
 	0,
 	0,
-	"bk3d"
+	"bk3d.gz"
 };
 
 // (fixme, Aramis) quick workaround to get rid of all those signed to unsigned warnings
@@ -105,62 +106,258 @@ const aiImporterDesc* Bk3dImporter::GetInfo() const
 	return &desc;
 }
 
+template<typename T> T* vecToArray(std::vector<T>& input)
+{
+	T* res = new T[input.size()];
+	for (int i = 0; i < input.size(); i++)
+		res[i] = input[i];
+	return res;
+}
+
+
 #ifdef DEBUG_B3D
 extern "C"{ void _stdcall AllocConsole(); }
 #endif
 // ------------------------------------------------------------------------------------------------
 void Bk3dImporter::InternReadFile(const std::string& pFile, aiScene* pScene, IOSystem* pIOHandler){
 	auto fileHeader = bk3d::load(pFile.c_str());
-	auto meshes = new vector<aiMesh*>();
-	auto nodes = new vector<aiNode*>();
+	auto meshes = vector<aiMesh*>();
+	auto nodes = vector<aiNode*>();
 	auto rootNode = new aiNode();
 	for (int i = 0; i < fileHeader->pMeshes->n; i++)
 	{
 		auto mesh = fileHeader->pMeshes->p[i];
 		auto newMesh = new aiMesh;
 		newMesh->mName = mesh->name;
-		bk3d::Attribute* positions = mesh->pAttributes->p[0];
-		auto sizeBytes = mesh->pSlots->p[positions->slot]->vtxBufferSizeBytes;
-		newMesh->mVertices = (aiVector3D*) positions->pAttributeBufferData;
-		switch (positions->formatGL)
-		{
-		case GL_FLOAT:
-			newMesh->mNumVertices = sizeBytes / (sizeof(float) * positions->numComp);
-			break;
-		default: throw "oida";
-		}
-		//if (mesh->pAttributes->n > 1)
-		for (int i = 0; i < mesh->pTransforms->n; i++)
-		{
-			auto transform = mesh->pTransforms->p[i].p;
-			if (transform->nodeType == NODE_TRANSFORM || transform->nodeType == NODE_TRANSFORMSIMPLE)
-			{
-				auto matrix = transform->asTransfSimple()->pMatrixAbs;
-				auto aiMatrix = aiMatrix4x4(
-					matrix->m[0], matrix->m[1], matrix->m[2], matrix->m[3],
-					matrix->m[4], matrix->m[5], matrix->m[6], matrix->m[7],
-					matrix->m[8], matrix->m[9], matrix->m[10], matrix->m[11],
-					matrix->m[12], matrix->m[13], matrix->m[14], matrix->m[15]);
 
+		bk3d::Attribute* normalsAttrib = nullptr;
+		bk3d::Attribute* positions = nullptr;
+		for (int a = 0;a < mesh->pAttributes->n;a++)
+		{
+			std::string name = mesh->pAttributes->p[a]->name;
+			if (name.find("normal") != std::string::npos) normalsAttrib = mesh->pAttributes->p[a];
+			else if (name.find("position") != std::string::npos) positions = mesh->pAttributes->p[a];
+		}
+ 		assert(positions);
+
+		auto sizeBytes = mesh->pSlots->p[positions->slot]->vtxBufferSizeBytes;
+
+		//switch (positions->formatGL)
+		//{
+		//case GL_FLOAT:
+		//	newMesh->mNumVertices = sizeBytes / (sizeof(float) * positions->numComp);
+		//	break;
+		//default: throw "oida";
+		//}
+
+		//newMesh->mVertices = new aiVector3D[newMesh->mNumVertices]; // copy since assimp deletes shared arrays otherwise
+		//memcpy(newMesh->mVertices, mesh->pSlots->p[positions->slot]->pVtxBufferData, sizeBytes);
+
+		void* data = mesh->pSlots->p[positions->slot]->pVtxBufferData;
+		auto stride = mesh->pSlots->p[positions->slot]->vtxBufferStrideBytes;
+		auto vertexCount = sizeBytes / stride;
+		auto vertices = new aiVector3D[vertexCount];
+		for (int v = 0; v < vertexCount;v++)
+		{
+			vertices[v] = *(aiVector3D*)data;
+			data = (char*)data + stride;
+			//data = (void*)((unsigned int)data + mesh->pSlots->p[positions->slot]->vtxBufferStrideBytes);
+		}
+		newMesh->mVertices = vertices;
+		newMesh->mNumVertices = vertexCount;
+		if (normalsAttrib)
+		{
+			auto normals = new aiVector3D[vertexCount];
+			void* data = mesh->pSlots->p[normalsAttrib->slot]->pVtxBufferData;
+			data = (char*)data + normalsAttrib->dataOffsetBytes;
+			auto stride = mesh->pSlots->p[normalsAttrib->slot]->vtxBufferStrideBytes;
+			for (int v = 0; v < vertexCount;v++)
+			{
+				normals[v] = *(aiVector3D*)data;
+				data = (char*)data + stride;
+				//data = (void*)((unsigned int)data + mesh->pSlots->p[positions->slot]->vtxBufferStrideBytes);
+			}
+			newMesh->mNormals = normals;
+		} else {
+			newMesh->mNormals = new aiVector3D[vertexCount];
+			memset(newMesh->mNormals, 0, vertexCount*sizeof(aiVector3D));
+		}
+		
+	
+		auto indicesV = new std::vector<aiFace>();
+		for (int pg = 0; pg < mesh->pPrimGroups->n; pg++)
+		{
+			bk3d::PrimGroup* pPG = mesh->pPrimGroups->p[pg];
+			GLenum PGTopo = pPG->topologyGL;
+			if (PGTopo != GL_TRIANGLES)
+				cout << PGTopo << endl;
+
+			unsigned int* indices;
+			if (pPG->indexFormatGL == GL_UNSIGNED_SHORT)
+			{
+				indices = new unsigned int[pPG->indexCount];
+				unsigned short* shortIndices = (unsigned short*)pPG->pIndexBufferData;
+				for (int ci = 0;ci < pPG->indexCount;ci++)
+				{
+					indices[ci] = shortIndices[ci];
+				}
+			}
+			else if (pPG->indexFormatGL == GL_UNSIGNED_INT)
+			{
+				indices = (unsigned int*)pPG->pIndexBufferData;
+			}
+			else if (pPG->indexFormatGL == 0)
+			{
+				indices = nullptr;
+			}
+			else throw "whot";
+			switch (PGTopo)
+			{
+			case GL_TRIANGLES:
+				if (pPG->indexArrayByteSize > 0)
+				{
+					for (int index = pPG->indexOffset;index < pPG->indexCount - 3;index += 3)
+					{
+						auto face = aiFace();
+						face.mIndices = new unsigned int[3]{ indices[index], indices[index + 1], indices[index + 2] };
+						face.mNumIndices = 3;
+						if (indices[index] >= newMesh->mNumVertices ||
+							indices[index + 1] >= newMesh->mNumVertices ||
+							indices[index + 2] >= newMesh->mNumVertices)
+						{
+							throw "index out of range";
+						}
+						indicesV->push_back(face);
+					}
+				}
+				else
+				{
+					for (unsigned int index = pPG->indexOffset;index < pPG->indexCount - 3;index += 3)
+					{
+						auto face = aiFace();
+						face.mIndices = new unsigned int[3]{ index, index + 1, index + 2 };
+						face.mNumIndices = 3;
+						indicesV->push_back(face);
+					}
+				}
+				break;
+			case GL_TRIANGLE_STRIP:
+				if (pPG->indexArrayByteSize > 0)
+				{
+					auto v0 = indices[pPG->indexOffset];
+					auto v1 = indices[pPG->indexOffset+1];
+					int i = 0;
+					for (int index = pPG->indexOffset + 2;index < pPG->indexCount;index++,i++)
+					{
+						auto face = aiFace();
+						if (v0 >= newMesh->mNumVertices ||
+							v1 >= newMesh->mNumVertices ||
+							indices[index] >= newMesh->mNumVertices)
+						{
+							throw "index out of range";
+						}
+
+						face.mIndices = new unsigned int[3]{ v0, v1, indices[index] };
+						face.mNumIndices = 3;
+						if (i % 2 == 0)
+							v0 = indices[index];
+						else
+							v1 = indices[index];
+
+						indicesV->push_back(face);
+					}
+				}
+				else
+				{
+					int i = 0;
+					unsigned int v0 = pPG->indexOffset;
+					unsigned int v1 = pPG->indexOffset + 1;
+					for (unsigned int index = pPG->indexOffset + 2;index < pPG->indexCount;index++,i++)
+					{
+						auto face = aiFace();
+						face.mIndices = new unsigned int[3]{ v0, v1, index };
+						face.mNumIndices = 3;
+						//indicesV->push_back(face);
+						if (i % 2 == 0)
+							v0 = index;
+						else
+							v1 = index;
+					}
+				}
+				break;
+			case GL_QUAD_STRIP:
+			case GL_LINES:
+				//cout << "unimplemented primitive topology. skipping group (" << PGTopo << ")." << endl;
+				break;
+			default:
+				//cout << "unknown primitive topology. skipping group (" << PGTopo << ")." << endl;
+				break;
+			}
+		}
+
+
+		newMesh->mFaces = indicesV->data();
+		newMesh->mNumFaces = indicesV->size();
+		newMesh->mPrimitiveTypes = aiPrimitiveType::aiPrimitiveType_TRIANGLE;
+
+
+		if (indicesV->size() == 0)
+		{
+			//cout << "all primities skipped. skipping mesh." << endl;
+		}
+		else
+		{
+			//if (mesh->pAttributes->n > 1)
+			if (mesh->pTransforms->n == 0)
+			{
 				auto node = new aiNode();
 				node->mNumMeshes = 1;
-				node->mTransformation = aiMatrix;
+				node->mTransformation = aiMatrix4x4();
 				node->mNumChildren = 0;
 				node->mParent = rootNode;
-				node->mMeshes = new unsigned int[1] {  (unsigned int)meshes->size() };
-				nodes->push_back(node);
+				node->mMeshes = new unsigned int[1]{ (unsigned int)meshes.size() };
+				nodes.push_back(node);
 			}
-			else throw "dont understand bones";
-			//if (auto v = dynamic_cast<bk3d::TransformSimple*>(transform.p)) {
-			//}
-		}
-		meshes->push_back(newMesh);
-	}
-	pScene->mMeshes = meshes->data();
-	pScene->mNumMeshes = meshes->size();
+			else {
+				for (int i = 0; i < mesh->pTransforms->n; i++)
+				{
+					auto transform = mesh->pTransforms->p[i].p;
+					if (transform->nodeType == NODE_TRANSFORM || transform->nodeType == NODE_TRANSFORMSIMPLE)
+					{
+						auto matrix = transform->asTransfSimple()->pMatrixAbs;
+						auto aiMatrix = aiMatrix4x4(
+							matrix->m[0], matrix->m[1], matrix->m[2], matrix->m[3],
+							matrix->m[4], matrix->m[5], matrix->m[6], matrix->m[7],
+							matrix->m[8], matrix->m[9], matrix->m[10], matrix->m[11],
+							matrix->m[12], matrix->m[13], matrix->m[14], matrix->m[15]);
 
-	rootNode->mChildren = nodes->data();
-	rootNode->mNumChildren = nodes->size();
+						auto node = new aiNode();
+						node->mNumMeshes = 1;
+						node->mTransformation = aiMatrix;
+						node->mNumChildren = 0;
+						node->mParent = rootNode;
+						node->mMeshes = new unsigned int[1]{ (unsigned int)meshes.size()};
+						nodes.push_back(node);
+					}
+					else throw "dont understand bones";
+					//if (auto v = dynamic_cast<bk3d::TransformSimple*>(transform.p)) {
+					//}
+				}
+			}
+			meshes.push_back(newMesh);
+		}
+	}
+	pScene->mMeshes = vecToArray(meshes);
+	pScene->mNumMeshes = meshes.size();
+
+	if (nodes.size() == 0)
+	{
+		cout << "no meshes in scene" << endl;
+	}
+	aiNode** nn = vecToArray(nodes);
+
+	rootNode->mChildren = nn;
+	rootNode->mNumChildren = nodes.size();
 
 	pScene->mRootNode = rootNode;
 	pScene->mNumMaterials = 0;
@@ -168,9 +365,14 @@ void Bk3dImporter::InternReadFile(const std::string& pFile, aiScene* pScene, IOS
 	pScene->mNumCameras = 0;
 	pScene->mNumLights = 0;
 	pScene->mNumTextures = 0;
+	pScene->mFlags = 0;
 
 	std::cout << pScene << endl;
 	std::cout << pScene->mRootNode << endl;
+
+	MakeVerboseFormatProcess().Execute(pScene);
+
+	std::cout << "fixed up" << endl;
 }
 
 

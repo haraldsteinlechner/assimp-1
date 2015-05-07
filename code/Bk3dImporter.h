@@ -72,6 +72,7 @@ namespace Assimp
 
 		virtual const aiImporterDesc* GetInfo() const;
 		virtual void InternReadFile(const std::string& pFile, aiScene* pScene, IOSystem* pIOHandler);
+		
 
 	public:
 		/// \brief	Returns whether the class can handle the format of the given file. 
